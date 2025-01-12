@@ -5,12 +5,40 @@
 #
 # Pulls in behaviour observations scored from video using Solomon Coder
 # https://solomon.andraspeter.com/
+#
+# ## Input Data
+#
+# This script looks for data at paths you specify though in-line coded strings,
+# starting with `p` (for 'path').
+#  - Behaviour scoring (eg 'all Solomon Coder CSVs in ... folder')
+#     - `pSolomonCsvs`
+#  - Environmental observations (eg 'weather.xlsx')
+#     - `pEnviroInput`
+#  - Approach/retreat distance scoring (eg 'approach.xlsx')
+#     - `pApproachInput`
+#
+# ## Output Data
+#
+# Processed data is saved to disk in `.Rda` (R Data) format, for easy import
+# back into R for analysis. All files are 
+#
+#  - Behaviour is processed in two ways:
+#     1. `dPbt_[session].Rda` (data-frame vector)
+#         Time-series data, each data-frame in vector is one date/site/burrow,
+#         rows are observations over time (in 30 minute blocks) and columns are
+#         the various variables, such as 
+#     2. `dSummary_[session].Rda` (data-frame)
+#         Single data-frame, each row is the processed observation of one unique
+#         date/site/burrow, columns are the summary variables, such as the
+#         number of times a lizard behaviour was observed that day, or the mean
+#         temperature of iButtons in the bottom position at that site on that day.
+#  - Approach data is saved as `dApproach_[session].Rda` (data-frame vector)
 
-# Load functions from library file
+# Load function library file
 source("pbtutils.r")
 
 # Session name: how you identify this data preparation batch
-sSessionName<-"Solomon2022_20241207i"
+sSessionName<-"Solomon2022_20250125c"
 
 # Set relative folder root (so this code works from any computer with Dee's
 # shared OneDrive folder locally synchronized)
@@ -64,6 +92,7 @@ cat(sprintf("Reading Solomon scoring data from all CSVs in:\n%s",
                pSolomonCsvs))
 
 # Raw Solomon scoring data-frame save location
+# Note: this is just the imported CSVs in data-frame format -- no processing yet
 pSolomonScoring<-file.path(getwd(),"OutputData/dSolomonScoring.Rda")
 
 # Once Solomon data has been imported, this program saves the data-frame to disk

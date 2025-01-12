@@ -2,15 +2,15 @@
 # PBT Data Preparation Function Library
 #
 # A collection of functions to support statistical analysis of Dee's pygmy
-# bluetongue fieldwork data 2020/2021.
-# Written by David Mansueto, Aug 2021 - 2024.
+# bluetongue (PBT) skink fieldwork data 2020/2021.
+# Written by David Mansueto, Aug 2021 - 2025.
 
 # 2024 Update: Now works with behaviour scoring undertaken in Solomon Coder
 
 library(dplyr) # used to concatenate data-frames
 
 # A note on type prefixes
-# Detailed backstory: David uses type prefixes to reduce the confusion
+# Detailed back-story: David uses type prefixes to reduce the confusion
 # inherent in "loosely typed" languages.
 # Loosely typed languages are those where variables are not tied to a
 # specific data type.
@@ -45,7 +45,59 @@ library(dplyr) # used to concatenate data-frames
 #| td| TimeDiff (a difference between two datetimes)                      |
 
 
+# Constants
 
+# Mapping between enclosures and lineage
+#
+# ("Mapping" in the 'lookup the value corresponding to this variable' sense)
+#
+# At the translocation site: Kelly Hill, Tarlee, there are 15 enclosures with
+# PBTs relocated from source "wild" sites, which we call the PBT's "lineage".
+#
+# This is a graphical map of the enclosures at Kelly Hill, showing the enclosure
+# with it's number (eg "5." == "KH5") and the source population of PBTs in that
+# enclosure (eg "Til" == "Tiliqua, Burra").
+# For example, "KH5" 'maps' to "Burra".
+#
+# |-------|-------|-------|
+# | 1.    | 2.    | 11.   |  ⇑
+# | Admix | Admix | TC    |  
+# |       |       |       |  N
+# |-------|-------|-------|
+# | 3.    | 4.    | 12.   |
+# | JT    | JT    | Admix |
+# |       |       |       |
+# |-------|-------|-------|
+# | 5.    | 6.    | 13.   |
+# | Til   | Til   | Til   |
+# |       |       |       |
+# |-------|-------|-------|
+# | 7.    | 8.    | 14.   |
+# | TC    | Admix | JT    |
+# |       |       |       |
+# |-------|-------|-------|
+# | 9.    | 10.   | 15.   |
+# | Admix | TC    |       |
+# |       |       |       |
+# |-------|-------|-------|
+#
+ENCLOSURE_LINEAGE_MAP <- list(
+  KH1 = "Admix",
+  KH2 = "Admix",
+  KH3 = "Jamestown",
+  KH4 = "Jamestown",
+  KH5 = "Burra",
+  KH6 = "Burra",
+  KH7 = "Kapunda",
+  KH8 = "Admix",
+  KH9 = "Admix",
+  KH10 = "Kapunda",
+  KH11 = "Kapunda",
+  KH12 = "Admix",
+  KH13 = "Burra",
+  KH14 = "Jamestown",
+  KH15 = NULL
+)
 
 #' Import and Prepare Dee's PBT Honours Data.
 #'
@@ -568,67 +620,149 @@ d_tidy_apprch_data <- function(d_apprch, vs_months_to_omit) {
   vs_weather_codes  <- v_get_col(d_apprch, "Weather")
   vn_retreat_metres <- v_get_col(d_apprch, "Distance (m)")
 
-  # Tidy up site and enclosure coding - can have different versions, we
-  # need to have exactly the same coding everywhere
+  # Site: where the burrow is located.
+  # This can be recorded in input data in many different ways, so we try to
+  # catch all the likely encodings.
+  # Kelly Hill, Tarlee: expecting "KH", "Kelly Hill", "Tarlee", or "TAR"
+  vi_tarlee    <- grep("kh|ke|ta", vs_sites, ignore.case = TRUE)
+  # Tiliqua, Burra: expecting "Tiliqua", "Til", "Burra", or "BUR"
+  vi_burra     <- grep("ti|bu", vs_sites, ignore.case = TRUE)
+  # Twin Creek, Kapunda: expecting "TC", "Twin Creek", "Kapunda", or "KAP"
+  vi_kapunda   <- grep("tc|tw|ka", vs_sites, ignore.case = TRUE)
+  # [site name?], Jamestown: expecting "JT", or "Jamestown"
+  vi_jamestown <- grep("jt|ja", vs_sites, ignore.case = TRUE)
 
-  # Kelly Hill is easy: always starts with "K"
-  vi_kelly_hill <- grep("k",  vs_sites, ignore.case = TRUE)
-  # Burra is always "Tiliqua" or "Til", so "ti" works
-  vi_tiliqua    <- grep("ti", vs_sites, ignore.case = TRUE)
-  # Twin Creek can be "TC" or "Twin Creek", so need some logic
-  vi_twin_creek <- if (sum(grep("tw", vs_sites, ignore.case = TRUE))) {
-    grep("tw", vs_sites, ignore.case = TRUE)
-  } else {
-    grep("tc", vs_sites, ignore.case = TRUE)
-  }
-
-  if ((length(vi_kelly_hill) + length(vi_tiliqua) + length(vi_twin_creek) !=
-    nrow(d_apprch))) {
+  # Check we matched everything
+  if (
+      sum(
+        length(vi_tarlee),
+        length(vi_burra),
+        length(vi_kapunda),
+        length(vi_jamestown)
+      ) != nrow(d_apprch)
+    ) {
     stop(paste("Unexpected site encoding in approach data! Must be:\n",
-      '  Kelly Hill: "KH", "KH5" or "KH7"\n',
-      '  Twin Creek: "TC" or "Twin Creek"\n',
-      '     Tiliqua: "Til" or "Tiliqua"\n',
-      "Note: upper or lower case does not matter."))
+      '  Kelly Hill, Tarlee: "KH", "KH5", "KH7", "TA", or "TAR"\n',
+      '  Twin Creek, Kapunda: "TC", "Twin Creek", "KA", or "KAP"\n',
+      '  Tiliqua, Burra: "Til", "Tiliqua", "BU", or "BUR"\n',
+      '  Jamestown: "JT"\n',
+      "Note: (upper or lower) case is ignored."))
   }
+  
+  # For convenience, collate burrows at translocation and at wild sites
+  vi_translocated <- c(vi_tarlee)
+  vi_wildSites    <- c(vi_burra, vi_kapunda, vi_jamestown)
 
-  # For enclosure, just retain '5' or '7' for now
-  vs_enclosures[vi_kelly_hill] <- s_get_last_char(
-    vs_enclosures[vi_kelly_hill]
+  # Sites: where the burrow is located.
+  # Ensure consistent naming:
+  vs_sites[vi_tarlee]    <- "Tarlee"
+  vs_sites[vi_kapunda]   <- "Kapunda"
+  vs_sites[vi_burra]     <- "Burra"
+  vs_sites[vi_jamestown] <- "Jamestown"
+  # # Site short name: used to align with environmental data
+  # vs_site_short <- vs_sites
+  # vs_site_short[vi_tarlee]    <- "KH"
+  # vs_site_short[vi_kapunda]   <- "TC"
+  # vs_site_short[vi_burra]     <- "Til"
+  # vs_site_short[vi_jamestown] <- "JT"
+  
+  # Enclosures: fenced pens at translocation sites.
+  # Wild sites don't have any enclosures, so make sure there's no bogus data
+  vs_enclosures[vi_wildSites] <- ""
+  # For translocation sites, clean up by ensuring there's only numbers
+  # This is done by substituting any character that isn't a 'digit' (regex: \\D)
+  # with nothing ('') (no characters -> in effect, deleting them).
+  vs_enclosures[vi_translocated] <- gsub(
+    '\\D',
+    '',
+    vs_enclosures[vi_translocated]
   )
-  vs_enclosures[vi_tiliqua]    <- ""
-  vs_enclosures[vi_twin_creek] <- ""
+  # Now build up from just number (eg '5') to include site (eg 'KH5')
+  vs_enclosures[vi_tarlee] <- paste(
+    "KH",
+    vs_enclosures[vi_tarlee],
+    sep = ""
+  )
+  
+  # Lineages: where the PBT originates from.
+  # Just the site for wild sites
+  vs_lineages <- vs_sites
+  # For translocation sites, we need to look up the origin site
+  vs_lineages[vi_translocated] <- unlist(
+    lapply(
+      vs_enclosures[vi_translocated],
+      function(i_enclosure) {
+        ENCLOSURE_LINEAGE_MAP[[i_enclosure]]
+      }
+    ),
+    use.names = FALSE
+  )
 
-  # Tidy up sites
-  vs_sites[vi_kelly_hill] <- "KH"
-  vs_sites[vi_twin_creek] <- "TC"
-  vs_sites[vi_tiliqua]    <- "Til"
-
-  # Use clean site as basis for enclosure (plus enc number from before)
-  vs_enclosures <- paste(vs_sites, vs_enclosures, sep = "")
-
-  # Lineage is HARD-CODE from enclosure
-  vs_lineages <- rep(NA, nrow(d_apprch))
-  vs_lineages[vs_sites == "Til" | vs_enclosures == "KH5"] <- "Tiliqua"
-  vs_lineages[vs_sites == "TC"  | vs_enclosures == "KH7"] <- "Twin Creek"
-
-  # Treatment Group = Enclosure + Lineage
-  vs_treatment_groups <- paste(
-    vs_enclosures,
-    vs_lineages,
+  # Treatment Group: Enclosure + Lineage
+  vs_treatment_groups <- vs_sites
+  vs_treatment_groups[vi_translocated] <- paste(
+    vs_enclosures[vi_translocated],
+    vs_lineages[vi_translocated],
     sep = "_"
   )
+  
+  # Replaced 2025-01-12
+  # # For enclosure, just retain '5' or '7' for now
+  # vs_enclosures[vi_tarlee] <- s_get_last_char(
+  #   vs_enclosures[vi_tarlee]
+  # )
+  # 
+  # # For sites without enclosures, make sure there's no bogus data
+  # vs_enclosures[vi_tiliqua]    <- ""
+  # vs_enclosures[vi_twin_creek] <- ""
+  # vs_enclosures[vi_jamestown]  <- ""
+  # 
+  # # Tidy up sites
+  # vs_sites[vi_tarlee] <- "Tarlee"
+  # vs_sites[vi_twin_creek] <- "TC"
+  # vs_sites[vi_tiliqua]    <- "Til"
+  # vs_sites[vi_jamestown]  <- "JT"
+  # 
+  # # Use clean site as basis for enclosure (plus enc number from before)
+  # vs_enclosures <- paste(vs_sites, vs_enclosures, sep = "")
+  # 
+  # # [!HARDCODE] Lineage is site (for wild sites), but at translocation site
+  # # (KH, Tarlee) enclosure number encodes the wild site the PBT is from.
+  # # [TODO] Enumerate!
+  # 
+  # vs_lineages <- vs_sites
+  # vs_lineages[vs_sites == "Tarlee"] <- 
+  #   
+  # vs_lineages <- rep(NA, nrow(d_apprch))  
+  # vs_lineages[vs_sites == "Til" | vs_enclosures == "KH5"] <- "Tiliqua"
+  # vs_lineages[vs_sites == "TC"  | vs_enclosures == "KH7"] <- "Twin Creek"
+  # vs_lineages[vs_sites == "JT"] <- "Jamestown"
+# 
+#   # Treatment Group = Enclosure + Lineage
+#   vs_treatment_groups <- paste(
+#     vs_enclosures,
+#     vs_lineages,
+#     sep = "_"
+#   )
 
+  # Actives: TRUE if PBT was observed (and retreated) or FALSE if not seen
   vl_actives <- rep(FALSE, nrow(d_apprch))
   vl_actives[!is.na(vn_retreat_metres)] <- TRUE
 
+  # Translocated: TRUE if PBT at a translocation site, or FALSE if at wild site
   vl_translocated <- rep(FALSE, nrow(d_apprch))
-  vl_translocated[vs_sites == "KH"] <- TRUE
+  vl_translocated[vi_translocated] <- TRUE
 
+  # Time & Date: try to parse strings from Excel
+  # [NOTE] Error prone! Ensure dates and times in Excel are TEXT (use "text()"
+  # function then "copy..." "paste as..." "values" to be sure) and not stored as
+  # numeric values of any sort.
   vt_raw <- t_from_s(
     paste(vs_dates, vs_times, sep = "_"),
     "%Y-%m-%d_%H:%M"
   )
 
+  # Break time into 30 minute blocks to align with environmental data
   vs_date_time30_site <- paste(
     s_from_t(vt_raw, "%Y-%m-%d"),
     s_from_t(t_floor(vt_raw, as.difftime(30, units = "mins")), "%H:%M"),
@@ -636,6 +770,7 @@ d_tidy_apprch_data <- function(d_apprch, vs_months_to_omit) {
     sep = "_"
   )
 
+  # Compile the 'tidy' data-frame
   d_apprch <- data.frame(
     vt_raw,
     vs_dates,
@@ -652,8 +787,11 @@ d_tidy_apprch_data <- function(d_apprch, vs_months_to_omit) {
     vs_date_time30_site
   )
 
-  d_apprch <- d_omitting_months(d_apprch, vs_months_to_omit)
-
+  # Omit any naughty months
+  if(vs_months_to_omit != "") {
+    d_apprch <- d_omitting_months(d_apprch, vs_months_to_omit)
+  }
+  
   return(d_apprch)
 }
 
@@ -2502,5 +2640,5 @@ save_data_to_file <- function(d_data, s_file, print_msg) {
 }
 
 get_version <- function() {
-  return("0.139: 23 Aug 2021")
+  return("0.211: 2025-01-12")
 }
